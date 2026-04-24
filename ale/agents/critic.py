@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..providers import Provider
 from .base import Agent
 
 CRITIC_SYSTEM = """You are the Critic in a multi-agent team. After a task run, you assess the Executor's trajectory.
@@ -16,14 +17,21 @@ CONFIDENCE: <0.0-1.0>
 """
 
 
-def critic(model: str | None = None) -> Agent:
-    kwargs = {"name": "critic", "system_prompt": CRITIC_SYSTEM, "max_tokens": 512}
-    if model:
-        kwargs["model"] = model
+def critic(provider: Provider | None = None) -> Agent:
+    kwargs: dict = {"name": "critic", "system_prompt": CRITIC_SYSTEM, "max_tokens": 512}
+    if provider is not None:
+        kwargs["provider"] = provider
     return Agent(**kwargs)
 
 
-def review(c: Agent, task_name: str, task_description: str, plan: str, trace_summary: str, reward: float) -> str:
+def review(
+    c: Agent,
+    task_name: str,
+    task_description: str,
+    plan: str,
+    trace_summary: str,
+    reward: float,
+) -> str:
     user = (
         f"Task: {task_name}\n"
         f"Description: {task_description}\n\n"
@@ -33,4 +41,4 @@ def review(c: Agent, task_name: str, task_description: str, plan: str, trace_sum
         f"Write your critique."
     )
     response = c.call(messages=[{"role": "user", "content": user}])
-    return c.text_of(response).strip()
+    return response.text.strip()

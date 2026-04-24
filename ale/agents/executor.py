@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..providers import Provider
 from .base import Agent
 
 EXECUTOR_SYSTEM = """You are the Executor in a multi-agent team. You act on a task by calling the provided tools.
@@ -12,8 +13,12 @@ Rules:
 """
 
 
-def executor(model: str | None = None, max_tokens: int = 2048) -> Agent:
-    kwargs = {"name": "executor", "system_prompt": EXECUTOR_SYSTEM, "max_tokens": max_tokens}
-    if model:
-        kwargs["model"] = model
+def executor(provider: Provider | None = None, max_tokens: int = 2048) -> Agent:
+    kwargs: dict = {
+        "name": "executor",
+        "system_prompt": EXECUTOR_SYSTEM,
+        "max_tokens": max_tokens,
+    }
+    if provider is not None:
+        kwargs["provider"] = provider
     return Agent(**kwargs)
