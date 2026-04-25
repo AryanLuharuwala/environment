@@ -4,12 +4,20 @@ A multi-agent playground plus RLAIF pipeline for Claude, with pluggable
 OpenAI-format backends for the student model. Built on the Anthropic Python
 SDK (and optionally the `openai` SDK).
 
+This repo also ships **[`forge/`](forge/README.md)** — a sibling package
+that mines real artifacts (git commits, legal/compliance corpora) and
+produces DPO training data scored by an AST + diff + (optional) tests
+verifier suite for code, or by an LLM grounding judge for reasoning
+tasks. forge writes to the same JSONL schema `ale rlaif train` consumes,
+so its output drops straight into the training loop.
+
 ## Install
 
 ```bash
 pip install -e .                 # core: anthropic only
 pip install -e '.[openai]'       # add OpenAI-format backend
 pip install -e '.[train]'        # add DPO training deps (torch/trl/peft/datasets)
+pip install -e '.[forge-embed]'  # forge: optional embedding-based retrieval
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
