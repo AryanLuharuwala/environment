@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..providers import Provider
 from .base import Agent
 
 PLANNER_SYSTEM = """You are the Planner in a multi-agent team. Your teammate, the Executor, will act on a task by calling tools.
@@ -13,10 +14,10 @@ Respond with the plan only. No preamble.
 """
 
 
-def planner(model: str | None = None) -> Agent:
-    kwargs = {"name": "planner", "system_prompt": PLANNER_SYSTEM, "max_tokens": 1024}
-    if model:
-        kwargs["model"] = model
+def planner(provider: Provider | None = None) -> Agent:
+    kwargs: dict = {"name": "planner", "system_prompt": PLANNER_SYSTEM, "max_tokens": 1024}
+    if provider is not None:
+        kwargs["provider"] = provider
     return Agent(**kwargs)
 
 
@@ -28,4 +29,4 @@ def make_plan(p: Agent, task_name: str, task_description: str, tool_names: list[
         f"Write the plan."
     )
     response = p.call(messages=[{"role": "user", "content": user}])
-    return p.text_of(response).strip()
+    return response.text.strip()

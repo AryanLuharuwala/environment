@@ -1,10 +1,9 @@
-from .base import DEFAULT_MODEL, Agent, Usage
+from .base import Agent, Usage
 from .critic import critic, review
 from .executor import executor
 from .planner import make_plan, planner
 
 __all__ = [
-    "DEFAULT_MODEL",
     "Agent",
     "Usage",
     "critic",

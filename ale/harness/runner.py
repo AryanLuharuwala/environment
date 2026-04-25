@@ -11,27 +11,35 @@ def _user_msg(text: str) -> dict[str, Any]:
     return {"role": "user", "content": text}
 
 
-def _assistant_blocks(blocks: list[Any]) -> dict[str, Any]:
-    """Echo Claude's response content back so tool_use IDs line up with tool_results."""
-    content = []
-    for b in blocks:
-        t = getattr(b, "type", "")
-        if t == "text":
-            if b.text:
-                content.append({"type": "text", "text": b.text})
-        elif t == "tool_use":
-            content.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
-    return {"role": "assistant", "content": content}
+def _run_tool_loop(ex: Agent, task: Task, trace: Trace, kickoff: str) -> None:
+    messages: list[dict[str, Any]] = [_user_msg(kickoff)]
+    for step in range(task.max_steps):
+        response = ex.call(messages=messages, tools=task.tools, tool_choice="any")
+        if response.text:
+            trace.log("message", text=response.text)
+        if not response.tool_calls:
+            trace.log("error", reason="no tool call returned")
+            break
+        messages.append(ex.provider.echo_assistant(response))
 
-
-def _tool_results(results: list[tuple[str, str]]) -> dict[str, Any]:
-    return {
-        "role": "user",
-        "content": [
-            {"type": "tool_result", "tool_use_id": tid, "content": content}
-            for tid, content in results
-        ],
-    }
+        results: list[tuple[str, str]] = []
+        done = False
+        for tc in response.tool_calls:
+            trace.log("tool_use", name=tc.name, input=tc.input, id=tc.id)
+            step_result = task.step(tc.name, tc.input)
+            trace.log(
+                "observation",
+                text=step_result.observation,
+                reward=step_result.reward,
+                done=step_result.done,
+            )
+            results.append((tc.id, step_result.observation))
+            if step_result.done:
+                done = True
+        messages.extend(ex.provider.tool_results(results))
+        trace.steps = step + 1
+        if done:
+            break
 
 
 def run_single(task: Task, ex: Agent | None = None) -> Trace:
@@ -41,45 +49,9 @@ def run_single(task: Task, ex: Agent | None = None) -> Trace:
 
     obs = task.reset()
     trace.log("observation", text=obs, initial=True)
+    kickoff = f"Task: {task.description}\n\nInitial observation: {obs}"
 
-    messages: list[dict[str, Any]] = [
-        _user_msg(f"Task: {task.description}\n\nInitial observation: {obs}")
-    ]
-
-    for step in range(task.max_steps):
-        response = ex.call(
-            messages=messages,
-            tools=task.tools,
-            tool_choice={"type": "any"},
-        )
-        text = ex.text_of(response)
-        if text:
-            trace.log("message", text=text)
-        tool_uses = ex.tool_uses(response)
-        if not tool_uses:
-            trace.log("error", reason="no tool call returned")
-            break
-
-        messages.append(_assistant_blocks(response.content))
-
-        results = []
-        done = False
-        for tu in tool_uses:
-            trace.log("tool_use", name=tu.name, input=tu.input, id=tu.id)
-            step_result = task.step(tu.name, tu.input)
-            trace.log(
-                "observation",
-                text=step_result.observation,
-                reward=step_result.reward,
-                done=step_result.done,
-            )
-            results.append((tu.id, step_result.observation))
-            if step_result.done:
-                done = True
-        messages.append(_tool_results(results))
-        trace.steps = step + 1
-        if done:
-            break
+    _run_tool_loop(ex, task, trace, kickoff)
 
     trace.final_reward = task.episode_reward()
     trace.log("reward", value=trace.final_reward)
@@ -91,11 +63,11 @@ def run_multi(
     p: Agent | None = None,
     ex: Agent | None = None,
     c: Agent | None = None,
+    with_critic: bool = True,
 ) -> Trace:
-    """Multi-agent loop: Planner -> Executor tool loop -> Critic review."""
+    """Multi-agent loop: Planner -> Executor tool loop -> optional Critic."""
     p = p or planner()
     ex = ex or executor()
-    c = c or critic()
 
     trace = Trace(task=task.name, seed=task.seed, mode="multi", model=ex.model)
 
@@ -105,52 +77,18 @@ def run_multi(
 
     obs = task.reset()
     trace.log("observation", text=obs, initial=True)
+    kickoff = (
+        f"Task: {task.description}\n\nPlan from the Planner:\n{plan}\n\n"
+        f"Initial observation: {obs}"
+    )
 
-    messages: list[dict[str, Any]] = [
-        _user_msg(
-            f"Task: {task.description}\n\nPlan from the Planner:\n{plan}\n\n"
-            f"Initial observation: {obs}"
-        )
-    ]
-
-    for step in range(task.max_steps):
-        response = ex.call(
-            messages=messages,
-            tools=task.tools,
-            tool_choice={"type": "any"},
-        )
-        text = ex.text_of(response)
-        if text:
-            trace.log("message", text=text)
-        tool_uses = ex.tool_uses(response)
-        if not tool_uses:
-            trace.log("error", reason="no tool call returned")
-            break
-
-        messages.append(_assistant_blocks(response.content))
-
-        results = []
-        done = False
-        for tu in tool_uses:
-            trace.log("tool_use", name=tu.name, input=tu.input, id=tu.id)
-            step_result = task.step(tu.name, tu.input)
-            trace.log(
-                "observation",
-                text=step_result.observation,
-                reward=step_result.reward,
-                done=step_result.done,
-            )
-            results.append((tu.id, step_result.observation))
-            if step_result.done:
-                done = True
-        messages.append(_tool_results(results))
-        trace.steps = step + 1
-        if done:
-            break
+    _run_tool_loop(ex, task, trace, kickoff)
 
     trace.final_reward = task.episode_reward()
     trace.log("reward", value=trace.final_reward)
 
-    critique = review(c, task.name, task.description, plan, trace.summary(), trace.final_reward)
-    trace.log("critique", text=critique, by=c.name)
+    if with_critic:
+        c = c or critic()
+        critique = review(c, task.name, task.description, plan, trace.summary(), trace.final_reward)
+        trace.log("critique", text=critique, by=c.name)
     return trace
